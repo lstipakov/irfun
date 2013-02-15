@@ -4,6 +4,16 @@
 #define IRpin          2
 #define IRledPin       3
 
+#define GOT_NOTHING 0
+#define GOT_LAMP_LAMP 1
+#define GOT_TV_POWER 2
+#define GOT_UNKNOWN 3
+#define GOT_LAMP_POWER 4
+#define GOT_LAMP_VOLUME_UP 5
+#define GOT_LAMP_VOLUME_DOWN 6
+#define GOT_TV_VOLUME_UP 7
+#define GOT_TV_VOLUME_DOWN 8
+
 // the maximum pulse we'll listen for - 65 milliseconds is a long time
 #define MAXPULSE 65000
 
@@ -31,25 +41,37 @@ void setup(void) {
 }
 
 unsigned long last = millis();
-boolean handling = false;
 
-boolean got_power = false;
-boolean got_lamp = false;
+int got_pulse = GOT_NOTHING;
 
 void interrupt_handler() {
   if (millis() - last < 200) return; 
 
   int num = listenForIR();
+
+  // garbage
+  if (num < 6) return;
+
   Serial.print("Pulse ");
   Serial.println(num);
 
   if (IRCompare(LAMP_LAMP, sizeof(LAMP_LAMP) / 4, num)) {
-    got_lamp = true;
-  } 
-  else
-    if (IRCompare(TV_POWER, sizeof(TV_POWER) / 4, num)) {
-      got_power = true;
-    }
+    got_pulse = GOT_LAMP_LAMP;
+  } else if (IRCompare(TV_POWER, sizeof(TV_POWER) / 4, num)) {
+    got_pulse = GOT_TV_POWER;
+  } else if (IRCompare(LAMP_POWER, sizeof(LAMP_POWER) / 4, num)) {
+    got_pulse = GOT_LAMP_POWER;
+  } else if (IRCompare(LAMP_VOLUME_UP, sizeof(LAMP_VOLUME_UP) / 4, num)) {
+    got_pulse = GOT_LAMP_VOLUME_UP;
+  } else if (IRCompare(LAMP_VOLUME_DOWN, sizeof(LAMP_VOLUME_DOWN) / 4, num)) {
+    got_pulse = GOT_LAMP_VOLUME_DOWN;
+  } else if (IRCompare(TV_VOLUME_UP, sizeof(TV_VOLUME_UP) / 4, num)) {
+    got_pulse = GOT_TV_VOLUME_UP;
+  } else if (IRCompare(TV_VOLUME_DOWN, sizeof(TV_VOLUME_DOWN) / 4, num)) {
+    got_pulse = GOT_TV_VOLUME_DOWN;
+  } else {
+    got_pulse = GOT_UNKNOWN;
+  }
 
   last = millis();
 }
@@ -104,9 +126,11 @@ boolean IRCompare(int ref[], int refSize, int readedSize) {
 
     int t = refVal * FUZZINESS;
     if (d > t) {
+      /*
       Serial.println(d);
       Serial.println(refVal, DEC);
       Serial.println(pulseVal, DEC);
+      */
       return false;  
     }
 
@@ -117,9 +141,11 @@ boolean IRCompare(int ref[], int refSize, int readedSize) {
 
     t = refVal * FUZZINESS;
     if (d > t) {
+      /*
       Serial.println(d);
       Serial.println(refVal, DEC);
       Serial.println(pulseVal, DEC);
+      */
       return false;  
     }
   }
@@ -128,26 +154,61 @@ boolean IRCompare(int ref[], int refSize, int readedSize) {
 }
 
 void loop(void) {
-  if (got_lamp) {
-    Serial.println("LAMP_LAMP");
-    sendCommand(TV_POWER, sizeof(TV_POWER) / sizeof(TV_POWER[0]));
-    got_lamp = false;
+  switch (got_pulse) {
+    case GOT_LAMP_LAMP:
+      Serial.println("LAMP_LAMP");
+      sendCommand(TV_POWER, sizeof(TV_POWER) / sizeof(TV_POWER[0]));
+      got_pulse = GOT_NOTHING;
+      break;
+      
+    case GOT_TV_POWER:
+      Serial.println("TV_POWER");
+      sendCommand(LAMP_POWER, sizeof(LAMP_POWER) / sizeof(LAMP_POWER[0]));
+      got_pulse = GOT_NOTHING;
+      break;
+    
+    case GOT_LAMP_POWER:
+      Serial.println("LAMP_POWER");
+      sendCommand(TV_POWER, sizeof(TV_POWER) / sizeof(TV_POWER[0]));
+      got_pulse = GOT_NOTHING;
+      break;  
+    
+    case GOT_LAMP_VOLUME_UP:
+      Serial.println("LAMP_VOLUME_UP");
+      sendCommand(TV_VOLUME_UP, sizeof(TV_VOLUME_UP) / sizeof(LAMP_LAMP[0]));
+      got_pulse = GOT_NOTHING;
+      break; 
+    
+    case GOT_LAMP_VOLUME_DOWN:
+      Serial.println("LAMP_VOLUME_DOWN");
+      sendCommand(TV_VOLUME_DOWN, sizeof(TV_VOLUME_DOWN) / sizeof(TV_VOLUME_DOWN[0]));
+      got_pulse = GOT_NOTHING;
+      break; 
+      
+   case GOT_TV_VOLUME_UP:
+      Serial.println("TV_VOLUME_UP");
+      sendCommand(LAMP_VOLUME_UP, sizeof(LAMP_VOLUME_UP) / sizeof(LAMP_LAMP[0]));
+      got_pulse = GOT_NOTHING;
+      break; 
+      
+   case GOT_TV_VOLUME_DOWN:
+      Serial.println("TV_VOLUME_DOWN");
+      sendCommand(LAMP_VOLUME_DOWN, sizeof(LAMP_VOLUME_DOWN) / sizeof(LAMP_VOLUME_DOWN[0]));
+      got_pulse = GOT_NOTHING;
+      break; 
+      
+    case GOT_UNKNOWN:
+      Serial.println("Unknown");
+      got_pulse = GOT_NOTHING;
+      printpulses();
+      break;
   }
-  if (got_power) {
-    Serial.println("TV_POWER");
-    sendCommand(LAMP_LAMP, sizeof(LAMP_LAMP) / sizeof(LAMP_LAMP[0]));
-    got_power = false;
-  }
-  //Serial.println("*");
-  //delay(500);
 }
 
 // This procedure sends a 38KHz pulse to the IRledPin 
 // for a certain # of microseconds. We'll use this whenever we need to send codes
 void pulseIR(long microsecs) {
   // we'll count down from the number of microseconds we are told to wait
-
-  //Serial.println(microsecs, DEC);
 
   cli();  // this turns off any background interrupts
 
@@ -176,16 +237,11 @@ void sendCommand(int data[], int len) {
 }
 
 void printpulses(void) {
-  Serial.println("\n\r\n\rReceived: \n\rOFF \tON");
+  Serial.println("Received:");
   for (uint8_t i = 0; i < currentpulse; i++) {
-    Serial.print(pulses[i][0] * RESOLUTION, DEC);
-    Serial.print(" usec, ");
-    Serial.print(pulses[i][1] * RESOLUTION, DEC);
-    Serial.println(" usec");
+    Serial.print(pulses[i][0] * RESOLUTION / 10, DEC);
+    Serial.print(", ");
+    Serial.print(pulses[i][1] * RESOLUTION / 10, DEC);
+    Serial.print(", ");
   }
 }
-
-
-
-
-
